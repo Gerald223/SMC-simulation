@@ -1,0 +1,17 @@
+# 生成数据
+#设定参数值
+sigma=2 #4
+rho=0.5 #3
+sigma_s=4 #5
+c=2.5 #1
+b=-1 #文章中b取负值,2
+s=np.zeros(shape=1000)
+np.random.seed(10)
+e=np.random.normal(0,1,1000)
+s[0]=np.random.normal(0,1,1)
+x=np.zeros(shape=1000)
+y=x=np.zeros(shape=1000)
+for t in range(1,1000):
+    s[t]=rho*s[t-1]+sigma_s*e[t]
+    x[t]=s[t]+sigma*e[t]
+    y[t]=c+b*x[t]
