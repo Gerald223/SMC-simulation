@@ -1,0 +1,126 @@
+# SMC Algorithm
+names=locals()
+nlen=200
+tlen=1000
+ms=1
+def SMCals(lmbda,simt,pml,pml_u):
+    global infit,phin,tlen,nlen,ot,z #以上为必要全局变量，定义的似然函数如有在函数之外调用，需要声明全局
+    qw=np.ones(shape=(1,nlen))/nlen #等权重
+    mbeta=np.zeros(shape=(1,pml))
+    abeta=np.zeros(shape=(1,pml))
+    mparmf=pd.DataFrame({})
+    aparmf=pd.DataFrame({})
+    for z in range(simt):            #simulation循环，实证数据simt设置为1即可（最大的一层循环）
+        ot=0
+        phin=np.power((np.arange(1,200+1)-1)/(200-1),lmbda)#从1到n都有了
+        Ywgt0=np.zeros(shape=(1,nlen))
+        knl=pd.DataFrame({})
+        for k in range(nlen): #初始化步骤
+            c=np.random.normal(2.5,1,1)
+            b=np.random.normal(-1,1,1)
+            rho=np.random.normal(0.5,1,1)
+            sigma=np.random.normal(2,1,1)
+            sigma_s=np.random.normal(4,1,1)
+           
+            #上两行为参数抽样分布与个数选择，记得修改
+            beta_inp=np.hstack((c,b,rho,sigma,sigma_s))#多个分布时合并参数
+            op=lkhd_f(beta_inp,tlen,ot)     #根据似然函数修改函数输入变量，这里的三个必须包含
+            lh=op[0]*phin[0]                #log-likelihood有时需要再处理，根据模型要求加减项目；这里用lh指代权重
+            knl['beta0'+str(k)]=beta_inp  #按列放进表格
+            Ywgt0[0,k]=np.exp(lh) 
+        if np.sum(Ywgt0)==0:
+            Ywgt0=qw
+        else:
+            Ywgt0=Ywgt0/np.sum(Ywgt0)
+        knl.loc['Ywgt0']=Ywgt0[0]  #另起一行，存入权重的数据
+        knl_rsp0=knl.sample(nlen,replace='True',weights=Ywgt0[0],axis=1) #按照weights重采样
+        Ywgt0=np.array([knl_rsp0.loc['Ywgt0']]) #提取出来权重数据
+        names['sgm'+str(ot)]=np.ones(shape=(1,nlen)) #初始化的方差是随机生成的
+        for t in range(1,200):
+            s=timer()
+            tyds=0
+            ot=ot+1
+            names['knl'+str(t)]=pd.DataFrame({})
+            names['Ywgt'+str(t)]=np.zeros(shape=(1,nlen))
+            names['sgm'+str(ot)]=np.ones(shape=(1,nlen))
+            for k in range(nlen):
+                acp=0
+                if t==1:
+                    names['knl_rsp'+str(t-1)]=knl_rsp0 #感觉没有必要？
+                beta_lag=np.array(names['knl_rsp'+str(t-1)].iloc[0:pml,k])
+                #beta_lag=np.array(names['knl_rsp'+str(t-1)].iloc[0:pml+pml_u,k]) #提取上一期的参数
+                op_lag=lkhd_f(beta_lag,tlen,ot)     #似然函数同上
+                lh_lag=op_lag[0]  ##有变动
+                #mutation step
+                for m in range(ms):#ms是MH M步的迭代次数 一般一次即可，根据模型调整
+                    d=np.random.normal(0,names['sgm'+str(ot-1)][0,k],pml)
+                    #d=np.random.normal(0,names['sgm'+str(ot-1)][0,k],pml+pml_u)#根据参数抽样分布任选，使用上一期的sigma?
+                    beta_wait=beta_lag+d
+                    op_wait=lkhd_f(beta_wait,tlen,ot)   #似然函数同上，这里求出似然函数的值
+                    lh_wait=op_wait[0]  ##有变动
+                    uv=np.random.uniform(0,1,1)
+                    if np.isnan(np.exp(lh_wait-lh_lag)):
+                        tshd=0
+                    else:
+                        tshd=min(1,np.exp(lh_wait-lh_lag))
+                    if uv<=tshd:
+                        beta_lag=beta_wait
+                        lh_lag=lh_wait
+                        acp=1+acp
+                    # 算下一步的方差
+                    names['sgm'+str(ot)][0,k]=names['sgm'+str(ot-1)][0,k]*(0.95+0.1*(np.exp(16*(acp/ms-0.35)/(1+np.exp(16*(acp/ms-0.35))))))
+                beta_inp=beta_lag
+                lh=np.exp(lh_lag) ##MH步骤之后将对数似然函数取指数
+                
+                #importance sampling step
+                if t==1:
+                    names['Ywgt'+str(t-1)]=Ywgt0 
+                names['Ywgt'+str(t)][0,k]=np.power(lh,phin[t]-phin[t-1])*names['Ywgt'+str(t-1)][0,k] ## t从2开始，权重不再一致
+                names['knl'+str(t)]['beta'+str(t)+str(k)]=beta_inp
+            if np.sum(names['Ywgt'+str(t)])==0:
+                names['Ywgt'+str(t)]=qw
+            names['Ywgt'+str(t)]=names['Ywgt'+str(t)]/np.sum(names['Ywgt'+str(t)])
+            names['knl'+str(t)].loc['Ywgt'+str(t)]=names['Ywgt'+str(t)][0]
+            
+            #selection step
+            neffi=np.sum(np.power(names['Ywgt'+str(t)],2))
+            if 1/neffi < 1/(2*nlen): #nlen/21/neffi < nlen/2:
+                names['knl_rsp'+str(t)]=names['knl'+str(t)].sample(nlen,replace='True',weights=names['Ywgt'+str(t)][0],axis=1)
+                #本身weights=names['Ywgt'+str(t)]已经暗含了权重为1
+            else:
+                names['knl_rsp'+str(t)]=names['knl'+str(t)]
+            names['knl_rsp'+str(t)]=names['knl_rsp'+str(t)].T.sort_values(by='Ywgt'+str(t),ascending=[0]).T
+            names['Ywgt'+str(t)]=np.array([names['knl_rsp'+str(t)].loc['Ywgt'+str(t)]]) #按照排序后的重新提取出来
+            #result for one step iteration
+            print('step time '+str(timer()-s)) #现在的时间减去之前的时间，计算耗时
+            tfparm=np.array(names['knl_rsp'+str(t)].iloc[:,0])  #计算第一列的值（排序，也就是众数）
+            beta_using=np.array(tfparm[0:pml+pml_u])
+            mbeta_using=list(beta_using)
+            print('mode beta for one step'+str(beta_using))
+            tvparm=np.array(names['knl_rsp'+str(t)].mean(axis=1)) #计算均值
+            beta_using=np.array(tvparm[0:pml+pml_u])
+            print('avg  beta for one step'+str(beta_using))
+        
+        #final result  
+        res=pd.DataFrame({})
+        fparm=np.array(names['knl_rsp'+str(t)].iloc[:,0])
+        beta_using=np.array(fparm[0:pml+pml_u])
+        mbeta_using=list(beta_using)
+        op_f=lkhd_f(beta_using,tlen,ot)    #似然函数同上
+        mbeta_using.append(op_f[0])
+        mbeta_using.append(tyds/tlen)  #？？？
+        mparmf[str(z)]=mbeta_using
+        print('mode beta'+str(beta_using))
+        print('mode likelihood'+str(op_f[0]))
+        res['max beta']=beta_using[0:pml]
+        
+        vparm=np.array(names['knl_rsp'+str(t)].mean(axis=1))
+        beta_using=np.array(vparm[0:pml+pml_u])
+        abeta_using=list(beta_using)
+        op_v=lkhd_f(beta_using,tlen,ot)    #似然函数同上
+        abeta_using.append(op_v[0])
+        abeta_using.append(tyds/tlen)
+        aparmf[str(z)]=abeta_using
+        print('avg beta'+str(beta_using))   
+        print('avg likelihood'+str(op_v[0]))
+        res['avg beta']=beta_using[0:pml]
