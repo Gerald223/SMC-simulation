@@ -1,0 +1,22 @@
+#@jit
+def lkhd_f(beta_inp,tlen,ot):#根据似然函数修改函数输入变量，这里的三个必须包含；tlen为数据长度；S_t是每次生成参数后随机生成的
+    #s1=timer()
+    #定义似然函数 写成log形式
+    #可以将模型计算单独定义，方便似然函数计算
+    e=np.random.normal(0,1,1000)
+    s=np.zeros(shape=1000)
+    sigma2=np.zeros(shape=1000)
+    mu=np.zeros(shape=1000)
+    s[0]=np.random.normal(0,1,1)
+    e[0]=np.random.normal(0,1,1)
+    sigma2[0]=np.random.normal(0,1,1)
+    for t in range(1,1000):
+        s[t]=beta_inp[2]*s[t-1]+beta_inp[4]*e[t]
+        sigma2[t]=(beta_inp[1]**2)*(beta_inp[3]**2)
+        mu[t]=beta_inp[0]+beta_inp[1]*s[t]
+    lh=-tlen/2*np.log(2*math.pi)-sum(np.log(np.sqrt(abs(sigma2))))-sum((y-mu)**2/(2*sigma2)) #似然函数值
+    if np.isnan(lh) or abs(lh)==float('inf'):
+        lh=-10000000
+    op=np.array([lh])
+    #print(str(timer()-s1)) #计算耗时
+    return op
